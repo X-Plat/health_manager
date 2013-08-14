@@ -11,7 +11,7 @@ module HealthManager
   MAX_BULK_ERROR_COUNT   = 10
 
   DEFAULTS = {
-    :cc_partition => "default",
+    :cc_partition => "ng",
     :intervals => {
       :desired_state_update    => 60,
       :analysis_delay           => 5,

@@ -3,21 +3,28 @@
 # is used to choose the right ip address (think of hosts that have multiple nics
 # and IP addresses assigned to them) of the host running the Health Manager. Default
 # value of nil, should work in most cases.
-local_route: 127.0.0.1
+local_route: 10.212.17.19
 
-# message bus URI, adjust as needed.
-# Can be overriden with MBUS_URI env variable.
-mbus: nats://nats:nats@127.0.0.1:4233/
+# NATS message bus URI, adjust as needed.
+# Can be overriden with NATS_URI env variable.
+mbus: nats://xplat_hz:OWMyZTFmN2Fk@nats.baidu.com:80/
 
 logging:
   level: info
+  file: /home/work/health_manager/log/health_manager.log
 
 # pid: /var/vcap/sys/run/healthmanager2.pid
 
 # set this to your dev instance api url
 # the default for the bulk_api host is http://api.vcap.me
 bulk_api:
-  host: http://api.vcap.me
+  host: http://api.paas.baidu.com
+
+# use value "disable" to stop shadowing and start using hm_next for
+# real any other value, as well as default, will result in hm_next
+# working in shadow mode.
+# WARNING: remove legacy health_manager if disabling shadow mode for hm_next
+shadow_mode: disable
 
 intervals:
 
@@ -73,6 +80,14 @@ intervals:
 
   # how often should the gc loop for droplets run
   droplet_gc:              300
+
+  # number of droplets objects to be published under varz[:droplets]
+  # use non-positive value to disable
+  max_droplets_in_varz:    0
+
+  # HM periodically pings NATS to see if it needs to re-subscribe to
+  # its events. This is the interval (in seconds) between those pings
+  check_nats_availability: 5
 
 # Used for /healthz and /vars endpoints. If not provided random
 # values will be generated on component start. Uncomment to use
