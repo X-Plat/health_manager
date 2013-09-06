@@ -13,3 +13,5 @@ ci-working-dir
 *.swp
 *.pid
 /vendor
+/log
+config/*
