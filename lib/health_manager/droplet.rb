@@ -20,7 +20,6 @@ module HealthManager
       # start out as stale until desired state is set
       @desired_state_update_required = true
       @desired_state_update_timestamp = now
-
     end
 
     def ripe_for_gc?
@@ -28,7 +27,7 @@ module HealthManager
     end
 
     def set_desired_state(desired_droplet)
-      logger.debug { "bulk: #set_desired_state: actual: #{self.inspect} desired_droplet: #{desired_droplet.inspect}" }
+      logger.debug("bulk: #set_desired_state", { actual: { instances: all_instances_report }, desired_droplet: desired_droplet })
 
       %w[state instances version package_state updated_at].each do |k|
         unless desired_droplet[k]
@@ -60,18 +59,18 @@ module HealthManager
     end
 
     def process_heartbeat(beat)
+      @extra_instances.clear
       instance = get_instance(beat.index, beat.version)
+      instance.receive_heartbeat(beat)
+      instance_guid_to_prune = instance.extra_instance_guid_to_prune
+      if instance_guid_to_prune
+        @extra_instances[instance_guid_to_prune] = {
+          version: beat.version,
+          reason: "Instance mismatch, pruning: #{instance_guid_to_prune}"
+        }
+      end
 
-      if beat.starting_or_running?
-        instance.receive_heartbeat(beat)
-        instance_guid_to_prune = instance.extra_instance_guid_to_prune
-        if instance_guid_to_prune
-          @extra_instances[instance_guid_to_prune] = {
-            version: beat.version,
-            reason: "Instance mismatch, pruning: #{instance_guid_to_prune}"
-          }
-        end
-      elsif beat.state == CRASHED
+      if beat.state == CRASHED
         @crashes[beat.instance_guid] = {
           'timestamp' => now,
           'crash_timestamp' => beat.state_timestamp
@@ -85,7 +84,7 @@ module HealthManager
     end
 
     def update_extra_instances
-      @extra_instances = {}
+      @extra_instances.clear
 
       num_running = 0
 
@@ -137,10 +136,8 @@ module HealthManager
                         # possibly add other sanity checks here to ensure valid running state,
                         # e.g. valid version, etc.
                        ].all?
-
       (0...num_instances).find_all do |i|
         instance = get_instance(i)
-        logger.debug1 { "looking at instance #{@id}:#{i}: #{instance.inspect}" }
         instance.missing?
       end
     end
@@ -180,15 +177,7 @@ module HealthManager
     end
 
     def mark_instance_as_down(version, index, instance_id)
-      instance = get_instance(index, version)
-      if instance.guid == instance_id
-        logger.debug("Marking as down: #{version}, #{index}, #{instance_id}")
-        instance.down!
-      elsif instance.guid
-        logger.warn("instance mismatch. actual: #{instance_id}, desired: #{instance.guid}")
-      else
-        # NOOP for freshly created instance with nil instance_id
-      end
+      get_instance(index, version).mark_as_down_for_guid(instance_id)
     end
 
     def all_starting_or_running_instances
@@ -243,7 +232,7 @@ module HealthManager
 
     def number_of_running_instances_by_version
       versions.inject({}) do |memo, (version, version_entry)|
-        memo[version] = version_entry["instances"].count { |_, instance| instance.running? }
+        memo[version] = version_entry["instances"].inject(0) { |memo, (_, instance)| memo + instance.running_guid_count }
         memo
       end
     end
@@ -277,6 +266,13 @@ module HealthManager
 
     def get_version(version = @live_version)
       versions[version] ||= {'instances' => {}}
+    end
+
+    def all_instances_report
+      versions.inject([]) do |memo, (version, _)|
+        get_instances(version).each { |_, instance| memo << {state: instance.state, version: instance.version, guid: instance.guid, index: instance.index, crash_count: instance.crash_count} }
+        memo
+      end
     end
   end
 end

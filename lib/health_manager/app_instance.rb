@@ -4,6 +4,7 @@ require 'health_manager/stateful_object'
 module HealthManager
   class AppInstance
     include StatefulObject
+    include HealthManager::Common
 
     attr_reader :state, :guid, :index, :pending_restart_receipt, :last_crash_timestamp, :state_timestamp, :crash_count, :version
 
@@ -34,12 +35,16 @@ module HealthManager
     end
 
     def receive_heartbeat(heartbeat)
-      @guid_stream << heartbeat.instance_guid
+      if heartbeat.starting_or_running?
+        @guid_stream << heartbeat.instance_guid
 
-      @last_heartbeat_time = now
-      @guid = heartbeat.instance_guid
-      @state = heartbeat.state
-      @state_timestamp = heartbeat.state_timestamp
+        @last_heartbeat_time = now
+        @guid = heartbeat.instance_guid
+        @state = heartbeat.state
+        @state_timestamp = heartbeat.state_timestamp
+      else
+        remove_guid_from_guid_stream(heartbeat.instance_guid)
+      end
     end
 
     def extra_instance_guid_to_prune
@@ -47,6 +52,10 @@ module HealthManager
       @guid_stream = @guid_stream.last(3)
       return nil if @guid_stream[0] == @guid_stream[1]
       @guid_stream.detect {|guid| guid != @guid}
+    end
+
+    def running_guid_count
+      running? ? @guid_stream.uniq.size : 0
     end
 
     def alive?
@@ -78,14 +87,22 @@ module HealthManager
       interval > 0 && @crash_count > interval
     end
 
+    def mark_as_down_for_guid(affected_guid)
+      return unless guid == affected_guid
+
+      logger.debug("hm.instance.marking-as-down", version: version, index: index, guid: guid)
+      remove_guid_from_guid_stream(guid)
+      down!
+    end
+
     private
+
+    def remove_guid_from_guid_stream(guid)
+      @guid_stream.delete(guid)
+    end
 
     def timestamp_older_than?(timestamp, interval)
       timestamp > 0 && (now - timestamp) > interval
-    end
-
-    def now
-      ::HealthManager::Manager.now
     end
 
     def reset_crash_count

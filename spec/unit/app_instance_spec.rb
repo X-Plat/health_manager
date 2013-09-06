@@ -3,7 +3,7 @@ require 'spec_helper'
 module HealthManager
   describe AppInstance do
     subject(:instance) { AppInstance.new("version", 0, 'fuid') }
-    let(:heartbeat) { Heartbeat.new({'instance' => 'fuid', 'state' => 'RUNNING', 'version' => "version", 'index' => 0}) }
+    let(:heartbeat) { Heartbeat.new({ instance: 'fuid', state: 'RUNNING', version: "version", index: 0, state_timestamp: 0 }) }
 
     before do
       Config.load({})
@@ -157,6 +157,55 @@ module HealthManager
           instance.should_not be_giveup_restarting
           instance.crash!(configured_giveup + 1)
           instance.should be_giveup_restarting
+        end
+      end
+    end
+
+    describe "running_guid_count" do
+      its(:running_guid_count) { should eq(0) }
+
+      context 'after receiving a heartbeat' do
+        before do
+          instance.receive_heartbeat(heartbeat)
+        end
+
+        its(:running_guid_count) { should eq(1) }
+      end
+
+      context 'after receiving a heartbeat that is not running' do
+        before do
+          instance.receive_heartbeat(Heartbeat.new({ instance: 'fuid', state: 'DOWN', version: "version", index: 0, state_timestamp: 0}))
+        end
+
+        its(:running_guid_count) { should eq(0) }
+      end
+
+      context 'after receiving different heartbeats' do
+        before do
+          instance.receive_heartbeat(heartbeat)
+          instance.receive_heartbeat(Heartbeat.new({ instance: 'fluid', state: 'RUNNING', version: "version", index: 0, state_timestamp: 0 }))
+        end
+
+        its(:running_guid_count) { should eq(2) }
+      end
+    end
+
+    describe "when an instance goes down (droplet.exited)" do
+      before do
+        instance.receive_heartbeat(heartbeat)
+      end
+
+      context "when the instance that went down has the same guid" do
+        it "should mark the instance as down" do
+          instance.mark_as_down_for_guid('fuid')
+          expect(instance).to be_down
+        end
+      end
+
+      context "when the instance that went down has a different guid" do
+        it "should not mark the instance as down" do
+          instance.mark_as_down_for_guid('fluid')
+          expect(instance).to be_running
         end
       end
     end
