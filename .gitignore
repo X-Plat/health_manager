@@ -14,4 +14,3 @@ ci-working-dir
 *.pid
 /vendor
 /log
-config/*
