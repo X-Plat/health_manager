@@ -77,16 +77,13 @@ module HealthManager
 
     def on_missing_instances(droplet)
       unless actual_state.available?
-        logger.info { "harmonizer: actual state was not available." }
+        logger.warn "harmonizer.actual-state.unavailable"
         return
       end
 
-      if droplet.desired_state_update_required?
-        logger.info { "harmonizer: desired_state_update_required: missing_instances ignored app_id=#{droplet.id} indices=#{missing_indices}" }
-        return
-      end
+      return if droplet.desired_state_update_required?
 
-      logger.debug { "harmonizer: missing_instances"}
+      logger.debug "harmonizer.missing-instances.processing"
       droplet.missing_indices.each do |index|
         instance = droplet.get_instance(index)
         if instance.flapping?
@@ -100,13 +97,12 @@ module HealthManager
     def on_extra_instances(droplet, extra_instances)
       return if extra_instances.empty?
 
-      logger.info("extra instances: #{extra_instances.inspect}")
       if droplet.desired_state_update_required?
-        logger.info { "harmonizer: desired_state_update_required: extra_instances ignored: #{extra_instances}" }
+        logger.info("harmonizer.desired_state_update_required.extra_instances_ignored", extra_instances)
         return
       end
 
-      logger.debug { "harmonizer: extra_instances"}
+      logger.info("harmonizer.extra_instances", extra_instances)
       nudger.stop_instances_immediately(droplet, extra_instances)
     end
 
@@ -237,7 +233,8 @@ module HealthManager
     end
 
     def droplets_analysis_for_slice
-      droplets = @droplet_registry.values.slice(@current_analysis_slice, ITERATIONS_PER_QUANTUM)
+      droplets_analyzed_per_iteration = Config.get_param(:number_of_droplets_analyzed_per_analysis_iteration)
+      droplets = @droplet_registry.values.slice(@current_analysis_slice, droplets_analyzed_per_iteration)
 
       if droplets && droplets.any?
         droplets.each do |droplet|
@@ -246,9 +243,9 @@ module HealthManager
         end
       end
 
-      @current_analysis_slice += ITERATIONS_PER_QUANTUM
+      @current_analysis_slice += droplets_analyzed_per_iteration
 
-      if droplets.nil? || droplets.size < ITERATIONS_PER_QUANTUM
+      if droplets.nil? || droplets.size < droplets_analyzed_per_iteration
         @current_analysis_slice = 0
         finish_droplet_analysis
       end

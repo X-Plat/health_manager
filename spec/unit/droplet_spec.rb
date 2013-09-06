@@ -17,6 +17,117 @@ describe HealthManager::Droplet do
 
   before { HealthManager::Config.load(config) }
 
+  describe "handling instances that start and then crash" do
+    let(:droplet) { HealthManager::Droplet.new(2) }
+    before do
+      heartbeat_properties = {
+        :droplet => 2,
+        :version => "abc",
+        :index => 0,
+        :state_timestamp => now,
+        :cc_partition => 'default'
+      }
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::CRASHED))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "beta", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "beta", :state => HealthManager::CRASHED))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "gamma", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "gamma", :state => HealthManager::CRASHED))
+      )
+    end
+
+    it "should not report any extra instances" do
+      expect(droplet.extra_instances.keys).to eql([])
+    end
+  end
+
+  describe "when an instance is evacuated, and then a new instance starts" do
+    let(:droplet) { HealthManager::Droplet.new(2) }
+    before do
+      heartbeat_properties = {
+        :droplet => 2,
+        :version => "abc",
+        :index => 0,
+        :state_timestamp => now,
+        :cc_partition => 'default'
+      }
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::RUNNING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::RUNNING))
+      )
+      droplet.mark_instance_as_down("abc",0,"alpha")
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "beta", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "beta", :state => HealthManager::RUNNING))
+      )
+    end
+
+    it "should not report any extra instances" do
+      expect(droplet.extra_instances.keys).to eql([])
+    end
+  end
+
+  describe "when three instances with the same index show up" do
+    let(:droplet) { HealthManager::Droplet.new(2) }
+
+    let(:heartbeat_properties) do
+    {
+      :droplet => 2,
+        :version => "abc",
+        :index => 0,
+        :state_timestamp => now,
+      :cc_partition => 'default'
+    }
+    end
+
+    it "should kill the instances one at a time" do
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "alpha", :state => HealthManager::RUNNING))
+      )
+
+      expect(droplet.extra_instances.keys).to eql([])
+
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "beta", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "beta", :state => HealthManager::RUNNING))
+      )
+
+      expect(droplet.extra_instances.keys).to eql(["alpha"])
+
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "gamma", :state => HealthManager::STARTING))
+      )
+      droplet.process_heartbeat(
+        HealthManager::Heartbeat.new(heartbeat_properties.merge(:instance => "gamma", :state => HealthManager::RUNNING))
+      )
+
+      expect(droplet.extra_instances.keys).to eql(["beta"])
+    end
+  end
+
   describe "handling multiple instances with the same index" do
     let(:droplet) { HealthManager::Droplet.new(2) }
     before do
@@ -58,7 +169,7 @@ describe HealthManager::Droplet do
     end
 
     context 'alpha, beta, alpha' do
-      it 'kill beta, keep alpha as the guid' do
+      before do
         expect(droplet.extra_instances.keys).to eql([])
         droplet.process_heartbeat(
           HealthManager::Heartbeat.new(
@@ -71,14 +182,21 @@ describe HealthManager::Droplet do
             :cc_partition => 'default'
           )
         )
+      end
+
+      it 'kill beta, keep alpha as the guid' do
         expect(droplet.extra_instances).to have(1).item
         expect(droplet.extra_instances.keys).to eql(["beta"])
         expect(droplet.get_instance(0, "abc").guid).to eql("alpha")
       end
+
+      it 'should report number of running instances by version as the number of unique instance guids that have come in' do
+        expect(droplet.number_of_running_instances_by_version['abc']).to eq(2)
+      end
     end
 
     context 'alpha, beta, beta' do
-      it 'kill alpha, assign beta as the guid' do
+      before do
         expect(droplet.extra_instances.keys).to eql([])
         droplet.process_heartbeat(
           HealthManager::Heartbeat.new(
@@ -91,9 +209,16 @@ describe HealthManager::Droplet do
             :cc_partition => 'default'
           )
         )
+      end
+
+      it 'kill alpha, assign beta as the guid' do
         expect(droplet.extra_instances).to have(1).item
         expect(droplet.extra_instances.keys).to eql(["alpha"])
         expect(droplet.get_instance(0, "abc").guid).to eql("beta")
+      end
+
+      it 'should report number of running instances by version as the number of unique instance guids that have come in' do
+        expect(droplet.number_of_running_instances_by_version['abc']).to eq(2)
       end
     end
   end
@@ -377,13 +502,17 @@ describe HealthManager::Droplet do
           :state => HealthManager::RUNNING,
           :version => "123",
           :timestamp => Time.now.to_i,
-          :index => 0
+          :index => 0,
+          :instance => 'guid',
+          :state_timestamp => 0
         ),
         HealthManager::Heartbeat.new(
           :state => HealthManager::RUNNING,
           :version => "123",
           :timestamp => Time.now.to_i,
-          :index => 1
+          :index => 1,
+          :instance => 'guid',
+          :state_timestamp => 0
         )
       ]
     end
@@ -435,25 +564,33 @@ describe HealthManager::Droplet do
                 :state => HealthManager::RUNNING,
                 :version => "some-old-version",
                 :timestamp => Time.now.to_i,
-                :index => 0
+                :index => 0,
+                :instance => 'guid',
+                :state_timestamp => 0
               ),
               HealthManager::Heartbeat.new(
                 :state => HealthManager::RUNNING,
                 :version => "123",
                 :timestamp => Time.now.to_i,
-                :index => 1
+                :index => 1,
+                :instance => 'guid2',
+                :state_timestamp => 0
               ),
               HealthManager::Heartbeat.new(
                 :state => HealthManager::RUNNING,
                 :version => "123",
                 :timestamp => Time.now.to_i,
-                :index => 2
+                :index => 2,
+                :instance => 'guid3',
+                :state_timestamp => 0
               ),
               HealthManager::Heartbeat.new(
                 :state => HealthManager::RUNNING,
                 :version => "123",
                 :timestamp => Time.now.to_i,
-                :index => 3
+                :index => 3,
+                :instance => 'guid4',
+                :state_timestamp => 0
               )
             ]
           end
@@ -471,25 +608,33 @@ describe HealthManager::Droplet do
                 :state => HealthManager::RUNNING,
                 :version => "123",
                 :timestamp => Time.now.to_i,
-                :index => 1
+                :index => 1,
+                :instance => 'guid',
+                :state_timestamp => 0
               ),
               HealthManager::Heartbeat.new(
                 :state => HealthManager::RUNNING,
                 :version => "123",
                 :timestamp => Time.now.to_i,
-                :index => 2
+                :index => 2,
+                :instance => 'guid',
+                :state_timestamp => 0
               ),
               HealthManager::Heartbeat.new(
                 :state => HealthManager::RUNNING,
                 :version => "123",
                 :timestamp => Time.now.to_i,
-                :index => 3
+                :index => 3,
+                :instance => 'guid',
+                :state_timestamp => 0
               ),
               HealthManager::Heartbeat.new(
                 :state => HealthManager::RUNNING,
                 :version => "some-old-version",
                 :timestamp => Time.now.to_i,
-                :index => 0
+                :index => 0,
+                :instance => 'guid',
+                :state_timestamp => 0
               )
             ]
           end
@@ -512,35 +657,48 @@ describe HealthManager::Droplet do
           :version => "123",
           :timestamp => Time.now.to_i,
           :instance => "beef",
-          :index => 0
+          :index => 0,
+          :state_timestamp => 0
         ),
         HealthManager::Heartbeat.new(
           :state => HealthManager::STOPPED,
           :version => "123",
           :timestamp => Time.now.to_i,
           :instance => "cafe",
-          :index => 2
+          :index => 2,
+          :state_timestamp => 0
         ),
         HealthManager::Heartbeat.new(
           :state => HealthManager::STARTING,
           :version => "123",
           :timestamp => Time.now.to_i,
           :instance => "face",
-          :index => 3
+          :index => 3,
+          :state_timestamp => 0
         ),
         HealthManager::Heartbeat.new(
           :state => HealthManager::RUNNING,
           :version => "123",
           :timestamp => Time.now.to_i,
           :instance => "dead",
-          :index => 1
+          :index => 1,
+          :state_timestamp => 0
+        ),
+        HealthManager::Heartbeat.new(
+          :state => HealthManager::RUNNING,
+          :version => "abc",
+          :timestamp => Time.now.to_i,
+          :instance => "abab",
+          :index => 0,
+          :state_timestamp => 0
         ),
         HealthManager::Heartbeat.new(
           :state => HealthManager::RUNNING,
           :version => "abc",
           :timestamp => Time.now.to_i,
           :instance => "baba",
-          :index => 0
+          :index => 0,
+          :state_timestamp => 0
         )
       ]
 
@@ -550,7 +708,7 @@ describe HealthManager::Droplet do
 
     describe "number_of_running_instances_by_version" do
       it "should return a map of versions to running instances" do
-        expect(@droplet.number_of_running_instances_by_version).to eql({ "123" => 2, "abc" => 1 })
+        expect(@droplet.number_of_running_instances_by_version).to eql({ "123" => 2, "abc" => 2 })
       end
     end
 
