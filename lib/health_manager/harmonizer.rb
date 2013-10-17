@@ -235,6 +235,7 @@ module HealthManager
     def droplets_analysis_for_slice
       droplets_analyzed_per_iteration = Config.get_param(:number_of_droplets_analyzed_per_analysis_iteration)
       droplets = @droplet_registry.values.slice(@current_analysis_slice, droplets_analyzed_per_iteration)
+      varz[:droplet_registry] = @droplet_registry
 
       if droplets && droplets.any?
         droplets.each do |droplet|
