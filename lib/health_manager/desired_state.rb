@@ -187,6 +187,8 @@ module HealthManager
         block.call(app_id.to_s, droplet) if block
       end
 
+      varz[:batch] = batch
+
       bulk_token
     end
 
