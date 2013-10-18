@@ -1,0 +1,31 @@
+#!/bin/bash
+
+PRO_HOME=/home/work/health_manager
+PRO_NAME=health_manager
+
+source $PRO_HOME/vendor/control/bin/lib.sh
+
+function start()
+{
+    cd $PRO_HOME
+      ./bin/health_manager -c config/health_manager.yml \
+          >> $PRO_HOME/log/stdout.log \
+              2>> $PRO_HOME/log/stderr.log &
+}
+
+function ck_health()
+{
+    [[ $(curl localhost:8432/healthz -u thin:thin 2>/dev/null) == ok ]] 
+}
+
+function stop()
+{
+    kill $(cat $PRO_HOME/data/pid)
+}
+
+function monitor()
+{
+    curl localhost:8432/varz -u thin:thin 2>/dev/null
+}
+
+action $@

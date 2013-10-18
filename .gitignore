@@ -12,5 +12,4 @@ ci-working-dir
 *.rbc
 *.swp
 *.pid
-/vendor
 /log

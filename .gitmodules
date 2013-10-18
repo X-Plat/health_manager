@@ -1,0 +1,3 @@
+[submodule "vendor/control"]
+	path = vendor/control
+	url = https://github.com/X-Plat/control
